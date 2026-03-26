@@ -1,7 +1,7 @@
 {
   "name": "eduhealth-ai-proxy",
-  "version": "1.0.0",
-  "description": "Backend proxy for EduHealth AI - secures Anthropic API key",
+  "version": "2.0.0",
+  "description": "Backend proxy for EduHealth AI - Groq (chat) + Gemini (scan)",
   "type": "module",
   "main": "server.js",
   "scripts": {
@@ -9,7 +9,6 @@
     "dev": "node --watch server.js"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.32.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.21.0",
