@@ -1,6 +1,6 @@
 /**
  * EduHealth AI - Backend Proxy Server
- * Dùng Groq (chat - miễn phí) + Gemini (scan ảnh - miễn phí)
+ * Chỉ dùng Groq (miễn phí vĩnh viễn)
  */
 
 import express from 'express';
@@ -38,21 +38,14 @@ app.get('/health', (_req, res) => {
   res.json({
     status: 'ok',
     groq: !!process.env.GROQ_API_KEY,
-    gemini: !!process.env.GEMINI_API_KEY,
     timestamp: new Date().toISOString()
   });
 });
 
-// ── Validate API keys ──────────────────────────────────────
+// ── Validate API key ──────────────────────────────────────
 const requireGroq = () => {
   if (!process.env.GROQ_API_KEY) {
     throw new Error('GROQ_API_KEY chưa được thiết lập. Vui lòng thêm vào Railway Variables.');
-  }
-};
-
-const requireGemini = () => {
-  if (!process.env.GEMINI_API_KEY) {
-    throw new Error('GEMINI_API_KEY chưa được thiết lập. Vui lòng thêm vào Railway Variables.');
   }
 };
 
@@ -113,10 +106,10 @@ app.post('/api/chat', async (req, res) => {
   }
 });
 
-// ── POST /api/scan (Gemini - miễn phí) ─────────────────────
+// ── POST /api/scan (Groq - miễn phí) ─────────────────────
 app.post('/api/scan', async (req, res) => {
   try {
-    requireGemini();
+    requireGroq();
 
     const { text, imageBase64 } = req.body;
 
@@ -124,44 +117,42 @@ app.post('/api/scan', async (req, res) => {
       return res.status(400).json({ error: 'Cần có text hoặc imageBase64.' });
     }
 
-    const parts = [];
-
+    let imageNote = '';
     if (imageBase64) {
-      parts.push({
-        inlineData: {
-          mimeType: 'image/jpeg',
-          data: imageBase64,
-        },
-      });
+      imageNote = '\n(Lưu ý: ảnh đính kèm không thể phân tích qua Groq - hãy dựa vào mô tả text).';
     }
 
-    if (text) {
-      parts.push({
-        text: `Bạn là trợ lý EduHealth AI. Sàng lọc giáo dục sức khỏe (Truyền nhiễm, Da liễu, Mắt).
+    const userPrompt = `Bạn là trợ lý EduHealth AI. Sàng lọc giáo dục sức khỏe (Truyền nhiễm, Da liễu, Mắt).
 Cấm chẩn đoán xác định. Dùng cụm từ "Gợi ý", "Liên quan", "Khả năng cao là".
-Mô tả: ${text}
-${imageBase64 ? 'Hãy phân tích kỹ dấu hiệu lâm sàng trong ảnh.' : ''}
-Trả về JSON: {"title":"string","analysis":["string"],"urgency":"Theo dõi & Vệ sinh tại nhà"|"Nên tham vấn Y tế học đường"|"Cần đi khám chuyên khoa ngay","dangerSigns":["string"],"safetyAdvice":["string"]}`
-      });
-    }
+Mô tả: ${text}${imageNote}
+Trả về JSON hợp lệ, KHÔNG kèm markdown code block:
+{"title":"string","analysis":["string"],"urgency":"Theo dõi & Vệ sinh tại nhà|Nên tham vấn Y tế học đường|Cần đi khám chuyên khoa ngay","dangerSigns":["string"],"safetyAdvice":["string"]}`;
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contents: [{ parts }] }),
-      }
-    );
+    const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        max_tokens: 1024,
+        temperature: 0.3,
+        messages: [
+          { role: 'system', content: 'Bạn là trợ lý EduHealth AI. LUÔN trả về JSON thuần, không có markdown code block, không có giải thích gì thêm.' },
+          { role: 'user', content: userPrompt }
+        ],
+      }),
+    });
 
     if (!response.ok) {
       const err = await response.text();
-      console.error('[/api/scan] Gemini error:', err);
+      console.error('[/api/scan] Groq error:', err);
       return res.status(502).json({ error: 'Lỗi AI. Vui lòng thử lại.' });
     }
 
     const data = await response.json();
-    const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    const rawText = data.choices?.[0]?.message?.content || '';
 
     const cleaned = rawText
       .replace(/```json\n?/gi, '')
@@ -187,5 +178,4 @@ app.listen(PORT, () => {
   console.log(`✅ EduHealth Proxy đang chạy tại http://localhost:${PORT}`);
   console.log(`   Health: http://localhost:${PORT}/health`);
   console.log(`   Groq:   ${process.env.GROQ_API_KEY ? '✅ configured' : '❌ missing'}`);
-  console.log(`   Gemini: ${process.env.GEMINI_API_KEY ? '✅ configured' : '❌ missing'}`);
 });
