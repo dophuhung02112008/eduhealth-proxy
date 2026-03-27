@@ -119,14 +119,55 @@ app.post('/api/scan', async (req, res) => {
 
     let imageNote = '';
     if (imageBase64) {
-      imageNote = '\n(Lưu ý: ảnh đính kèm không thể phân tích qua Groq - hãy dựa vào mô tả text).';
+      imageNote = '\n[THÔNG TIN TỪ ẢNH]: Ảnh đính kèm có thể chứa thông tin lâm sàng. Hãy dựa vào mô tả text làm chính, kết hợp suy luận từ ảnh nếu có.';
     }
 
-    const userPrompt = `Bạn là trợ lý EduHealth AI. Sàng lọc giáo dục sức khỏe (Truyền nhiễm, Da liễu, Mắt).
-Cấm chẩn đoán xác định. Dùng cụm từ "Gợi ý", "Liên quan", "Khả năng cao là".
-Mô tả: ${text}${imageNote}
-Trả về JSON hợp lệ, KHÔNG kèm markdown code block:
-{"title":"string","analysis":["string"],"urgency":"Theo dõi & Vệ sinh tại nhà|Nên tham vấn Y tế học đường|Cần đi khám chuyên khoa ngay","dangerSigns":["string"],"safetyAdvice":["string"]}`;
+    const userPrompt = `Bạn là trợ lý sàng lọc sức khỏe EduHealth AI dành cho môi trường học đường Việt Nam.
+NHIỆM VỤ: Phân tích mô tả triệu chứng và đưa ra gợi ý sàng lọc sơ bộ (KHÔNG phải chẩn đoán y khoa).
+
+## Danh mục bệnh lý cần xem xét:
+- DA LIÊU: Chốc lở (Impetigo), Nấm da đầu (Tinea Capitis)
+- TRUYỀN NHIỄM: Tay-Chân-Miệng (HFMD), Sởi (Measles), Thủy đậu (Chickenpox), Rubella, Quai bị (Mumps), Sốt xuất huyết (Dengue), COVID-19
+- MẮT: Viêm kết mạc (Đau mắt đỏ - Conjunctivitis)
+- HÔ HẤP: Cúm (Influenza)
+- TIÊU HÓA: Tiêu chảy nhiễm trùng (Rotavirus)
+- KÝ SINH TRÙNG: Chấy rận (Head Lice), Sốt tinh hồng nhiệt (Scarlet Fever)
+
+## Nguyên tắc phân tích:
+1. Dựa trên MÔ TẢ để suy luận các khả năng có thể xảy ra (dùng cụm "Gợi ý", "Liên quan", "Khả năng cao là")
+2. Phân loại mức độ URGENCY phù hợp với 3 mức
+3. Liệt kê DẤU HIỆU NGUY HIỂM cần đi khám ngay
+4. Đưa ra HÀNH ĐỘNG AN TOÀN cụ thể
+5. ĐÁNH DẤU các VÙNG TỔN THƯƠNG có thể trên ảnh (nếu có mô tả hình ảnh)
+
+## Phân tích chi tiết (analysis):
+- Phân tích từng triệu chứng: "Biểu hiện X có thể liên quan đến..."
+- So sánh với các bệnh lý trong danh mục trên
+- Giải thích cơ chế lây lan trong trường học
+- Đánh giá mức độ nguy hiểm tổng thể
+
+## Nguyên nhân có thể (causes):
+- Yếu tố thuận lợi: thời tiết, mùa dịch, điều kiện vệ sinh
+- Nguồn lây: trong lớp, ở nhà, thực phẩm, côn trùng, tiếp xúc
+- Yếu tố nguy cơ: chưa tiêm vaccine, vệ sinh kém, nhà đông người
+
+Mô tả triệu chứng: ${text}${imageNote}
+
+Trả về JSON thuần, KHÔNG có markdown code block, KHÔNG có giải thích:
+{
+  "title": "Tên bệnh lý được gợi ý (hoặc 'Cần khám để xác định')",
+  "category": "DANH_MỤC (VD: TRUYỀN NHIỄM, DA LIÊU...)",
+  "analysis": ["Phân tích chi tiết từng dòng, 2-4 mục, viết rõ ràng"],
+  "causes": ["Nguyên nhân có thể 1", "Nguyên nhân có thể 2", "Nguyên nhân có thể 3"],
+  "urgency": "Theo dõi & Vệ sinh tại nhà | Nên tham vấn Y tế học đường | Cần đi khám chuyên khoa ngay",
+  "dangerSigns": ["Dấu hiệu nguy hiểm cần đi khám ngay 1", "..."],
+  "safetyAdvice": ["Hành động an toàn 1", "Hành động an toàn 2", "Hành động an toàn 3"],
+  "annotations": [
+    {"x": 0.3, "y": 0.4, "w": 0.15, "h": 0.1, "label": "Vùng tổn thương nhẹ", "severity": "medium"},
+    {"x": 0.6, "y": 0.2, "w": 0.2, "h": 0.15, "label": "Vùng cần theo dõi", "severity": "low"}
+  ]
+}
+Chỉ trả về JSON thuần, không có markdown, không có giải thích gì khác.`;
 
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
@@ -136,8 +177,8 @@ Trả về JSON hợp lệ, KHÔNG kèm markdown code block:
       },
       body: JSON.stringify({
         model: 'llama-3.3-70b-versatile',
-        max_tokens: 1024,
-        temperature: 0.3,
+        max_tokens: 2048,
+        temperature: 0.35,
         messages: [
           { role: 'system', content: 'Bạn là trợ lý EduHealth AI. LUÔN trả về JSON thuần, không có markdown code block, không có giải thích gì thêm.' },
           { role: 'user', content: userPrompt }
@@ -165,6 +206,9 @@ Trả về JSON hợp lệ, KHÔNG kèm markdown code block:
     } catch {
       return res.status(502).json({ error: 'AI trả về dữ liệu không hợp lệ.', raw: rawText });
     }
+
+    // Ensure defaults for optional fields
+    if (!result.annotations) result.annotations = [];
 
     res.json(result);
   } catch (err) {
